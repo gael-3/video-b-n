@@ -4,7 +4,7 @@ import numpy as np
 import os
 from concurrent.futures import ProcessPoolExecutor
 
-# Función para convertir un frame a blanco y negro
+# Función top-level para procesar cada frame
 def convertir_frame(frame):
     return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -23,8 +23,8 @@ def main():
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height), isColor=False)
 
-    # Aquí usamos todos los núcleos disponibles
-    num_nucleos = os.cpu_count()  
+    # Forzamos exactamente 8 núcleos
+    num_nucleos = 8  
 
     chunk_size = 100
     start_time = time.time()
@@ -32,25 +32,34 @@ def main():
 
     print(f"Procesando video en paralelo con {num_nucleos} núcleos... Presiona 'q' para salir.")
 
-    while True:
-        frames = []
-        for _ in range(chunk_size):
-            ret, frame = cap.read()
-            if not ret:
+    # Mantenemos el pool abierto para reutilizar los 8 procesos sin la sobrecarga de crearlos en cada ciclo
+    with ProcessPoolExecutor(max_workers=num_nucleos) as executor:
+        stop_processing = False
+
+        while True:
+            frames = []
+            for _ in range(chunk_size):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+
+            if not frames:
                 break
-            frames.append(frame)
 
-        if not frames:
-            break
-
-        with ProcessPoolExecutor(max_workers=num_nucleos) as executor:
+            # Mapeo en paralelo sobre los 8 trabajadores
             resultados = list(executor.map(convertir_frame, frames))
 
-        for gray_frame in resultados:
-            out.write(gray_frame)
-            cv2.imshow('Video en Blanco y Negro', gray_frame)
-            frame_count += 1
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            for gray_frame in resultados:
+                out.write(gray_frame)
+                cv2.imshow('Video en Blanco y Negro', gray_frame)
+                frame_count += 1
+                
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    stop_processing = True
+                    break
+
+            if stop_processing:
                 break
 
     cap.release()
